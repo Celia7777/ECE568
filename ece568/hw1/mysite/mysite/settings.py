@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-j$ez-38lhbr_q&782#)nva*c8qbec-8fmimj+xfp47(#+zt)n(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['vcm-24034.vm.duke.edu', '127.0.0.1']
+ALLOWED_HOSTS = ['vcm-24034.vm.duke.edu', '127.0.0.1', 'vcm-24671.vm.duke.edu']
 
 
 # Application definition
@@ -55,7 +55,7 @@ ROOT_URLCONF = 'mysite.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -106,7 +106,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC-5'
+TIME_ZONE = 'EST'
 
 USE_I18N = True
 
