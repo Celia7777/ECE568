@@ -1,0 +1,373 @@
+#include "proxy.hpp"
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+/* get the first request */
+void proxy::receiveRequestFromClient(int fd, std::string &ans){
+    char ans1[65536] = {0};
+    int recv_ans = recv(fd, ans1, sizeof(ans1), 0);
+    if(recv_ans==-1){
+        std::cout << "Error in receive first request from client" << std::endl;
+        return;
+    }
+    // if (send(fd, ans1, strlen(ans1), 0) == -1){
+    //     perror("send");
+    // }
+    ans.assign(ans1, sizeof(ans1));
+    // std::cout << ans1 << std::endl;
+}
+
+proxy::proxy(const char* port):port_num(port){}
+
+void proxy::start(){
+    server *myserver = new server();
+    int server_socket = myserver->setup("12345");
+    cache *mycache = new cache(100);
+    std::fstream fs;
+    //TODO setup server socket setup failure
+    while(1){
+        int server_accept_socket = myserver->toAccept(server_socket);
+        // std::string ans;
+        //create a new thread to receive the information from 
+        //processRequestFromClient(&server_accept_socket);
+        pthread_t new_thread;
+        Thread *mythread = new Thread(mycache, server_accept_socket);
+        pthread_create(&new_thread, NULL, processRequestFromClient, mythread);
+    }
+}
+
+
+void * proxy::processRequestFromClient(void * mythread_ptr){
+    //pthread_mutex_lock(&mutex);
+    Thread * mythread = (Thread*)mythread_ptr;
+    cache* mycache = mythread->mycache;
+    int server_accept_socket = mythread->sockect_as_server;
+    std::string original_rqst;
+    //int original_len;
+    receiveRequestFromClient(server_accept_socket, original_rqst);
+    if(original_rqst.empty()){
+        return NULL;
+    }
+    //std::cout << original_rqst;
+    //begin parse
+    Request new_rqst(original_rqst);
+    //std::cout<<"parse request start here!"<<std::endl;
+    std::cout<<"the first original request: "<<new_rqst.origi_rqst<<std::endl;
+    //std::cout<<"request line: "<<new_rqst.rqst_line<<std::endl;
+    //std::cout<<"method: "<<new_rqst.method<<std::endl;
+    //std::cout<<"URL: "<<new_rqst.url<<std::endl;
+    //std::cout<<"HOST name: "<<new_rqst.domain<<std::endl;
+    //std::cout<<"Port: "<<new_rqst.port<<std::endl;
+    //  int length = new_rqst.getLength();
+    //std::cout<<"content length: "<<length<<std::endl;
+    //pthread_mutex_unlock(&mutex);
+
+    //create socket to connect to original server
+    client c;
+    char* domain = new char[new_rqst.domain.length() + 1];
+    std::strcpy (domain, new_rqst.domain.c_str());
+    char* port = new char[new_rqst.port.length() + 1];
+    std::strcpy (port, new_rqst.port.c_str());
+    int connectToServer_fd = c.setupClient(domain, port);
+    std::cout << "creating a socket to connect to the original server " << connectToServer_fd <<std::endl;
+    //if get
+    if(new_rqst.method.compare("GET")==0){
+        std::cout << "start getting process" << std::endl;
+        getRequest(connectToServer_fd, server_accept_socket, new_rqst, mycache);
+    }
+    //if post
+    if(new_rqst.method.compare("POST")==0){
+        std::cout << "start posting process" << std::endl;
+        //int client_fd, int server_fd, Request rqst
+        postRequest(connectToServer_fd, server_accept_socket, new_rqst);
+    }
+
+    //if connect
+    if(new_rqst.method.compare("CONNECT")==0){
+        std::cout << "start connecting process" << std::endl;
+        tryConnect(server_accept_socket, connectToServer_fd);
+    }
+    close(server_accept_socket);
+    close(connectToServer_fd);
+    std::cout << "finish" << std::endl;
+    //pthread_mutex_unlock(&mutex);
+      return NULL;
+}
+
+
+void proxy::tryConnect(int server_accept_socket, int connectToServer_fd){
+    int x = send(server_accept_socket, "HTTP/1.1 200 OK\r\n\r\n", 19, 0);
+    std::cout<<"send value here! "<<x<<std::endl;
+    fd_set readfds;//set of socket destriptor
+    int n = std::max(server_accept_socket, connectToServer_fd) + 1;
+    int rv;
+    while(1){
+        FD_ZERO(&readfds);//clear the set
+        //add fd to the set
+        FD_SET(server_accept_socket, &readfds);
+        FD_SET(connectToServer_fd, &readfds);
+
+        rv = select(n, &readfds, NULL, NULL, NULL);
+        if(rv==-1){
+            //perror("waiting client");
+            break;
+        }
+        char msg1[65536] = {0};
+        char msg2[65536] = {0};
+        //proxy received the data from client
+        if(FD_ISSET(server_accept_socket, &readfds)){
+            //std::cout << "proxy are receiving data from client" << std::endl;
+            int recv_res = recv(server_accept_socket, msg1, sizeof(msg1), 0);
+            if(recv_res<=0){
+                perror("here");
+                //std::cout << "ERROR in recv from client" << recv_res <<std::endl;
+                return;
+            }else{
+                //std::cout << "receive bytes from client: " <<recv_res << std::endl;
+            }
+             //re-send the data to server
+             int send_res = send(connectToServer_fd, msg1, recv_res, 0);
+             if(send_res>0){
+                 //std::cout << "Success in send to server " << send_res << std::endl;
+             }
+             if(send_res<=0){
+                 //std::cout << "Error in send to server" << send_res << std::endl;
+                 return;
+                 //perror("send to client: ");
+             }
+        }
+        if(FD_ISSET(connectToServer_fd, &readfds)){
+            //std::cout << "proxy are receving data from server" << std::endl;
+            int recv_res_1 = recv(connectToServer_fd, msg2, sizeof(msg2), 0);
+            if(recv_res_1<=0){
+                //perror("data from server");
+                //std::cout << "data from server";
+                return;
+            }
+            //std::cout << "receive bytes from server: " <<recv_res_1 << std::endl;
+             //re-send the data to client
+             int send_res_1 = send(server_accept_socket, msg2, recv_res_1, 0);
+             if(send_res_1<=0){
+                 //perror("send to server");
+                 //std::cout << "send to server" << std::endl;
+                 return;
+                 //perror("send to server: ");
+             }else{
+                 //std::cout << "SUCCESS in send data to client: " << send_res_1 <<std::endl;
+             }
+        }
+    }
+}
+
+
+std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk){
+    if(!chunk && msg.length()<=65536){
+        return msg;
+    }
+    int total = 0;
+    int rev_len = 0;
+    std::string total_rqst;
+    total_rqst.append(msg);
+    std::cout<<"first string: "<<total_rqst<<std::endl;
+    
+    while(1){
+        std::cout<<"in while now"<<std::endl;
+        char rev_msg[65536] = {0};
+        rev_len = recv(fd, rev_msg, sizeof(rev_msg), 0);
+        std::cout<<"first receive length: "<<rev_len<<std::endl;
+        if(rev_len<=0){
+            break;
+        }
+        std::string rev_msg_str(rev_msg, rev_len);
+        std::cout<<"receive length is "<<rev_len<<" receive message is "<<rev_msg_str<<std::endl;
+        if(chunk){
+            std::cout<<"it is chunked"<<std::endl;
+            std::size_t f_chunkend = rev_msg_str.find("0");
+            if(f_chunkend != std::string::npos){
+                std::string rec(rev_msg, rev_len);
+                total_rqst.append(rec);
+                total += rev_len;
+                break;
+            }
+        }
+        else{
+            std::cout<<"it is nochunk"<<std::endl;
+            if(rev_len <= 0){
+                break;
+            }
+        }
+        std::string rec(rev_msg, rev_len);
+        total_rqst.append(rec);
+        total += rev_len;
+    }
+
+    return total_rqst;
+}
+
+
+/* proxy as client, connect to server*/
+void proxy::postRequest(int client_fd, int server_fd, Request rqst){
+    //std::string origi_msg = rqst.origi_rqst;
+    //int content_len = rqst.getLength();
+    //std::string origi_msg = receiveAllchunks(server_fd);
+    //std::cout<<"original message from client"<<origi_msg<<std::endl;
+    //if(content_len != -1){
+       //  char request[origi_msg.size() + 1];
+       //  strcpy(request, origi_msg.c_str());
+    //send to original server, make sure to receive all request
+    bool rqst_chunk = rqst.isChunked();
+    std::cout<<"chunk value is "<<rqst_chunk<<std::endl;
+    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk);
+    std::cout << "message is: " << origi_msg;
+    send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
+    //receive from original server, receive the first response
+        char origi_resp[65536] = {0};
+        int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
+
+        if(num > 0){
+            Response response(origi_resp);
+            //check chunk, receive all chunks
+            bool rsps_chunk = response.isChunked();
+            std::string all_response = receiveAllmsg(client_fd, response.response, rsps_chunk);
+            // write into log here
+            send(server_fd, all_response.data(), all_response.size() + 1, 0);
+        }
+        else{
+            perror("error port");
+            //std::cerr<<"error port"<<std::endl;
+        }
+
+    //}
+}
+
+void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request rqst, Response resp, cache* mycache){
+    // check ETag
+    std::cout<<"handle request: "<<rqst.rqst_line<<std::endl;
+    std::cout<<"handle request header: "<<rqst.header<<std::endl;
+    std::cout<<"handle response: "<<resp.response<<std::endl;
+    std::string vali_rqst = rqst.header + "\r\n";
+    if(resp.etag != ""){
+        vali_rqst += "If-None-Match: " + resp.etag + "\r\n";
+    }
+    if(resp.last_modify != ""){
+        vali_rqst += "If-Modified-Since: " + resp.last_modify + "\r\n";
+    }
+    vali_rqst += "\r\n\r\n";
+    std::cout << "new request is" << vali_rqst << std::endl;
+    std::cout << "new request length" <<vali_rqst.length()<<std::endl;
+    send(proxy_as_client_fd, vali_rqst.data(), vali_rqst.size() + 1, 0);
+    char vali_resp[65536] = {0};
+    int vali_resp_len = recv(proxy_as_client_fd, vali_resp, sizeof(vali_resp), 0);
+    std::cout << "revalidate: LENGTH" << vali_resp_len << std::endl;
+    if(vali_resp_len != 0){
+        std::string reps_str(vali_resp, vali_resp_len);
+        Response response(reps_str);
+        if(response.code == "200"){
+            //update cache and response
+            mycache->updateCache(rqst.rqst_line, response);
+            send(proxy_as_server_fd, response.response.data(), response.response.size() + 1, 0);
+        }
+        else if(response.code == "304"){
+            //response using cache
+            send(proxy_as_server_fd, resp.response.data(), resp.response.size() + 1, 0);
+        }
+    }
+}
+
+void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycache){
+    // tell if the rqst is in cache or not
+    //int content_len = rqst.getLength();
+    //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
+    std::string origi_msg = rqst.origi_rqst;
+    std::cout<<"original message from client"<<origi_msg<<std::endl;
+
+    std::string rqst_line = rqst.rqst_line;
+    if(mycache->checkCache(rqst_line)){
+        std::cout << "in cache" << std::endl;
+        //if in cache
+        Response response = mycache->getResponse(rqst_line);
+        std::cout << "getting response from cache: " << response.response << std::endl;
+        std::cout << "mymax-age: "<<response.max_age<<std::endl;
+        std::cout << "myisfresh: "<<response.isFresh()<<std::endl;
+        std::cout << "mydate: "<<response.date<<std::endl;
+        std::cout << "my utc date: "<<response.getTime(response.date)<<std::endl;
+        std::cout << "my current age: "<<response.getLifespan()<<std::endl;
+        //check no cache
+        if(response.is_nocache){
+            std::cout << "no cache" << std::endl;
+            revalidate(client_fd, server_fd, rqst, response, mycache);
+            return;
+        }
+        //check fresh
+        if(response.isFresh()){
+            std::cout << "is fresh" << std::endl;
+            send(server_fd, response.response.data(), response.response.size() + 1, 0);
+            return;
+        }else{
+            std::cout << "is validating" << std::endl;
+            revalidate(client_fd, server_fd, rqst, response, mycache);
+            return;
+        }
+    }
+    // if it is not in cache
+    else{
+        std::cout << "not in cache" << std::endl;
+        //int content_len = rqst.getLength();
+        //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
+        //std::cout<< content_len <<" bytes, original message from client"<<origi_msg<<std::endl;
+        //if(content_len != -1){
+       //  char request[origi_msg.size() + 1];
+       //  strcpy(request, origi_msg.c_str());
+
+        //send to original server
+        int send_Res = send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
+        std::cout << "send " << send_Res << "to server" << std::endl;
+        //receive from original server
+        char origi_resp[65536] = {0};
+        int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
+        std::cout << "receive: " << num << std::endl;
+        if(num > 0){
+            std::string resp_str(origi_resp, num);
+            Response response(resp_str);
+            std::cout<<"received response"<<response.response<<std::endl;
+
+            //check chunk, receive all chunks
+            if(response.isChunked()){
+                send(server_fd, origi_resp, num, 0);
+                char chunked_buffer[1024] = {0};
+                while(1){
+                    int rec_num = recv(client_fd, chunked_buffer, sizeof(chunked_buffer), 0);
+                    std::string rec_str(chunked_buffer, rec_num);
+                    resp_str.append(rec_str);
+                    if (rec_num <= 0) {
+                        std::cout << "chunked break\n";
+                        break;
+                    }
+                    send(server_fd, chunked_buffer, rec_num, 0);
+                }
+                Response store_resp(resp_str);
+                //store response into cache
+                std::cout << "store response in to cache" << std::endl;
+                mycache->addToCache(rqst_line, store_resp);
+            }
+            //not chunk
+            else{
+                //store response into cache
+                std::cout << "store response in to cache" << std::endl;
+                mycache->addToCache(rqst_line, response);
+                //tell if it is cacheable, if it is, update the cache
+                
+                // write into log here
+                send(server_fd, origi_resp, num, 0);
+            }
+            
+        }
+        else{
+            perror("error port");
+            //std::cerr<<"error port"<<std::endl;
+        }
+    //}
+}
+
+}
