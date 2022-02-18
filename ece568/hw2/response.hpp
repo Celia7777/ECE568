@@ -19,6 +19,7 @@ public:
     // header field
     std::string etag;
     std::string expire;
+    std::string expire_date;
     std::string last_modify;
     std::string date;
     std::string cache_control;
@@ -33,6 +34,7 @@ public:
         ParseStatusline();
         ParseCode();
         ParseHeader();
+        getExpiretime();
     }
 
     void ParseStatusline();
@@ -47,5 +49,6 @@ public:
     int getLength();
     bool isChunked();
     bool isFresh();
+    void getExpiretime();
 };
 #endif

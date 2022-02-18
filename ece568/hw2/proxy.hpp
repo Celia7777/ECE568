@@ -30,10 +30,11 @@ class proxy{
         static void getRequest(int client_fd, int server_fd, Request rqst, cache* mycache, int id);
         static std::string receiveAllchunks(int socket_as_server, std::string rqst, int content_length);
         static void revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request rqst, Response resp, cache* mycache, int id);
-        static std::string receiveAllmsg(int fd, std::string msg, bool chunk); 
+        static std::string receiveAllmsg(int fd, std::string msg, bool chunk, int& total);
         static void writeLog(std::string msg);
         static void closeFile(const char* path);
         static char* getCurrenttime();
         static void writeLogforproxyrequest(Request rqst_msg, int id);
         static void writeLogforproxyresponse(Response rsps_msg, Request rqst, int id);
+        static void writeLogproxyserver(Response new_rsps);
 };

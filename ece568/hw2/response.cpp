@@ -184,3 +184,41 @@ bool Response::isFresh(){
         
 }
 
+void Response::getExpiretime(){
+    // find the max-age, compare with the age of this response
+    if(max_age != ""){
+        long maxage = stol(max_age);
+        // get the age of the response
+        double currentage = getLifespan();
+        //double expireage = currentage + maxage;
+        time_t expireage = (time_t)(currentage + maxage);
+        time(&expireage);
+        char* expirechar = ctime(&expireage);
+        std::string expire_str(expirechar);
+        expire_date=expire_str;  
+    }
+    else if(expire != ""){
+        time_t exp_time = getTime(expire);
+        time(&exp_time);
+        char* expirechar = ctime(&exp_time);
+        std::string expire_str(expirechar);
+        expire_date=expire_str; 
+    }
+    // calculate the freshness time if no max-age and Expires
+    else if(last_modify != ""){
+        time_t lstmodtime = getTime(last_modify);
+        time_t datetime = getTime(date);
+        double freshtime = difftime(lstmodtime, datetime)/10.0;
+        time_t expireage = (time_t)(lstmodtime + freshtime);
+        time(&expireage);
+        char* expirechar = ctime(&expireage);
+        std::string expire_str(expirechar);
+        expire_date=expire_str; 
+        
+    }
+    else{
+        expire_date = "";
+    }
+        
+}
+

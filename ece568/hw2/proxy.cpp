@@ -19,7 +19,7 @@ void proxy::receiveRequestFromClient(int fd, std::string &ans){
     // if (send(fd, ans1, strlen(ans1), 0) == -1){
     //     perror("send");
     // }
-    ans.assign(ans1, sizeof(ans1));
+    ans.assign(ans1, recv_ans);
 }
 
 proxy::proxy(const char* port):port_num(port){}
@@ -141,7 +141,15 @@ void proxy::tryConnect(int server_accept_socket, int connectToServer_fd, int id,
         if(FD_ISSET(server_accept_socket, &readfds)){
             //std::cout << "proxy are receiving data from client" << std::endl;
             int recv_res = recv(server_accept_socket, msg1, sizeof(msg1), 0);
-            if(recv_res<=0){
+            if(recv_res==0){
+                std::stringstream ss;
+                ss << id;
+                ss << ": Tunnel closed\n";
+                pthread_mutex_lock(&mutex);
+                writeLog(ss.str());
+                pthread_mutex_unlock(&mutex);
+                return;
+            }else if(recv_res<0){
                 perror("here");
                 //std::cout << "ERROR in recv from client" << recv_res <<std::endl;
                 return;
@@ -164,7 +172,16 @@ void proxy::tryConnect(int server_accept_socket, int connectToServer_fd, int id,
         if(FD_ISSET(connectToServer_fd, &readfds)){
             //std::cout << "proxy are receving data from server" << std::endl;
             int recv_res_1 = recv(connectToServer_fd, msg2, sizeof(msg2), 0);
-            if(recv_res_1<=0){
+            if(recv_res_1==0){
+                std::stringstream ss;
+                ss << id;
+                ss << ": Tunnel closed\n";
+                pthread_mutex_lock(&mutex);
+                writeLog(ss.str());
+                pthread_mutex_unlock(&mutex);
+                return;
+            }
+            if(recv_res_1<0){
                 //perror("data from server");
                 //std::cout << "data from server";
                 return;
@@ -185,11 +202,11 @@ void proxy::tryConnect(int server_accept_socket, int connectToServer_fd, int id,
 }
 
 
-std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk){
+std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total){
     if(!chunk && msg.length()<=65536){
+        total+=msg.length() + 1;
         return msg;
     }
-    int total = 0;
     int rev_len = 0;
     std::string total_rqst;
     total_rqst.append(msg);
@@ -242,9 +259,10 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
     //send to original server, make sure to receive all request
     bool rqst_chunk = rqst.isChunked();
     std::cout<<"chunk value is "<<rqst_chunk<<std::endl;
-    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk);
+    int origi_msg_len = 0;
+    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
     std::cout << "message is: " << origi_msg;
-    send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
+    send(client_fd, origi_msg.data(), origi_msg_len, 0);
     Request request(origi_msg);
     pthread_mutex_lock(&mutex);
     writeLogforproxyrequest(request, id);
@@ -256,12 +274,15 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
             Response response(origi_resp);
             //check chunk, receive all chunks
             bool rsps_chunk = response.isChunked();
-            std::string all_response = receiveAllmsg(client_fd, response.response, rsps_chunk);
+            int all_response_len = 0;
+            std::string all_response = receiveAllmsg(client_fd, response.response, rsps_chunk, all_response_len);
+            Response new_rsps(all_response);
             pthread_mutex_lock(&mutex);
             writeLogforproxyresponse(all_response, request, id);
             pthread_mutex_unlock(&mutex);
             // write into log here
-            send(server_fd, all_response.data(), all_response.size() + 1, 0);
+            send(server_fd, all_response.data(), all_response_len, 0);
+            writeLogproxyserver(new_rsps);
         }
         else{
             perror("error port");
@@ -303,10 +324,25 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
             //update cache and response
             mycache->updateCache(rqst.rqst_line, response);
             send(proxy_as_server_fd, response.response.data(), response.response.size() + 1, 0);
+            writeLogproxyserver(response);
+            std::stringstream ss;
+            ss << id << ": ";
+            if(response.is_nostore==1){
+                ss << "not cacheable because it contains no store field";
+            }
+            else if(response.is_nocache==1){
+                ss << "cached, but requires re-validation";
+            }else if(response.expire_date!=""){
+                ss << "cached, but expires at " << response.expire_date;
+            }
+            pthread_mutex_lock(&mutex);
+            writeLog(ss.str());
+            pthread_mutex_unlock(&mutex);
         }
         else if(response.code == "304"){
             //response using cache
-            send(proxy_as_server_fd, resp.response.data(), resp.response.size() + 1, 0);
+            send(proxy_as_server_fd, response.response.data(), response.response.size() + 1, 0);
+            writeLogproxyserver(response);
         }
         
     }
@@ -317,7 +353,10 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //int content_len = rqst.getLength();
     //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
     bool rqst_chunk = rqst.isChunked();
-    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk);
+    int origi_msg_len = 0;
+    std::cout << "ans length:"<<rqst.origi_rqst.length()<<std::endl;
+    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
+
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
     std::string rqst_line = rqst.rqst_line;
@@ -355,6 +394,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             writeLog(ss.str());
             pthread_mutex_unlock(&mutex);
             send(server_fd, response.response.data(), response.response.size() + 1, 0);
+            writeLogproxyserver(response);
             return;
         }else{
             std::cout << "is not fresh" << std::endl;
@@ -386,7 +426,8 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
        //  strcpy(request, origi_msg.c_str());
 
         //send to original server
-        int send_Res = send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
+        std::cout << "origin message length is " << origi_msg_len << std::endl;
+        int send_Res = send(client_fd, origi_msg.data(), origi_msg_len, 0);
         std::cout << "send " << send_Res << "to server" << std::endl;
         std::cout << "send request: " << origi_msg<< std::endl;
         //receive from original server
@@ -397,7 +438,8 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             std::string resp_str(origi_resp, num);
             Response response(resp_str);
             bool resp_chunk = response.isChunked();
-            std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk);
+            int total_response_len = 0;
+            std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk, total_response_len);
             Response store_resp(total_response);
             std::cout<<"total message: "<<total_response<<std::endl;
             std::cout<<"received response: "<<store_resp.response<<std::endl;
@@ -427,7 +469,7 @@ char* proxy::getCurrenttime(){
 
 void proxy::writeLogforproxyrequest(Request rqst_msg, int id){
     std::stringstream ss;
-    ss << id<<": "<<" Requesting "<<'\"'<<rqst_msg.rqst_line<<'\"'<<" from "<<rqst_msg.domain << "\n";
+    ss << id<<": "<<"Requesting "<<'\"'<<rqst_msg.rqst_line<<'\"'<<" from "<<rqst_msg.domain << "\n";
     std::string str = ss.str();
     writeLog(str);
 }
@@ -436,6 +478,13 @@ void proxy::writeLogforproxyresponse(Response rsps_msg, Request rqst, int id){
     std::stringstream ss;
     std::cout << "TEST: "<<rsps_msg.status_line << std::endl;
     ss << id<<": "<<" Received "<<'\"'<<rsps_msg.status_line<<'\"'<<" from "<<rqst.domain << "\n";
+    std::string str = ss.str();
+    writeLog(str);
+}
+
+void proxy::writeLogproxyserver(Response new_rsps){
+    std::stringstream ss;
+    ss << "Responding"<<" "<<'\"'<<new_rsps.status_line<<'\"';
     std::string str = ss.str();
     writeLog(str);
 }
