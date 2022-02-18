@@ -179,7 +179,7 @@ bool Response::isFresh(){
         }
     }
     else{
-        return false;
+        return true;
     }
         
 }

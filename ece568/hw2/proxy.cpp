@@ -68,7 +68,7 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
     //begin parse
     Request new_rqst(original_rqst);
     //std::cout<<"parse request start here!"<<std::endl;
-    std::cout<<"the first original request: "<<new_rqst.origi_rqst<<std::endl;
+    std::cout<<"the first original request: "<<new_rqst.rqst_line<<std::endl;
     //std::cout<<"request line: "<<new_rqst.rqst_line<<std::endl;
     //std::cout<<"method: "<<new_rqst.method<<std::endl;
     //std::cout<<"URL: "<<new_rqst.url<<std::endl;
@@ -317,7 +317,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //int content_len = rqst.getLength();
     //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
     bool rqst_chunk = rqst.isChunked();
-    std::string origi_msg = receiveAllmsg(server_fd, rqst.rqst_line, rqst_chunk);
+    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk);
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
     std::string rqst_line = rqst.rqst_line;
@@ -334,9 +334,10 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::cout << "my current age: "<<response.getLifespan()<<std::endl;
         //check no cache
         if(response.is_nocache){
+            std::cout << "is no cache" << std::endl;
             std::stringstream ss;
             ss << id;
-            ss << ": not in cache\n";
+            ss << ": in cache, requires validation\n";
             pthread_mutex_lock(&mutex);
             writeLog(ss.str());
             pthread_mutex_unlock(&mutex);
@@ -356,6 +357,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             send(server_fd, response.response.data(), response.response.size() + 1, 0);
             return;
         }else{
+            std::cout << "is not fresh" << std::endl;
             std::stringstream ss;
             ss << id;
             ss << ": in cache, requires validation\n";
@@ -386,6 +388,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         //send to original server
         int send_Res = send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
         std::cout << "send " << send_Res << "to server" << std::endl;
+        std::cout << "send request: " << origi_msg<< std::endl;
         //receive from original server
         char origi_resp[65536] = {0};
         int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
@@ -395,8 +398,9 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             Response response(resp_str);
             bool resp_chunk = response.isChunked();
             std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk);
-            std::cout<<"received response"<<response.response<<std::endl;
             Response store_resp(total_response);
+            std::cout<<"total message: "<<total_response<<std::endl;
+            std::cout<<"received response: "<<store_resp.response<<std::endl;
             mycache->addToCache(rqst_line, store_resp);
             
         }
