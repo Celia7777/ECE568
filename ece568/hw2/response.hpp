@@ -14,6 +14,7 @@
 class Response{
 public:
     std::string response;
+    std::string status_line;
     std::string code;
     // header field
     std::string etag;
@@ -22,16 +23,19 @@ public:
     std::string date;
     std::string cache_control;
     std::string max_age;
+    bool is_revalidate = false;
     bool is_nocache = false;
     bool is_nostore = false;
 public:
     Response(){
     }
     Response(std::string input):response(input){
+        ParseStatusline();
         ParseCode();
         ParseHeader();
     }
 
+    void ParseStatusline();
     void ParseCode();
 
     std::string ParseHelper(std::string target, std::string find_start, std::string find_end);

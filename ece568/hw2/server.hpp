@@ -25,7 +25,7 @@ class server{
         //int BACKLOG = 100;//how many pending connection will be held
     public:
         int setup(const char * port);
-        int toAccept(int socket_fd);
+        int toAccept(int socket_fd, std::string &ip);
         int trySelect(int socket_fd);
         //char* receiveRequestFromClient(int receive_fd);
 };

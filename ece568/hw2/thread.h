@@ -7,13 +7,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-
+#include <string>
 class Thread{
 public:
     cache *mycache;
     int sockect_as_server;
-
-    Thread(cache *mycache, int server_sockect):mycache(mycache), sockect_as_server(server_sockect){}
+    std::string ip;
+    int thread_id;
+    Thread(cache *mycache, int server_sockect, std::string browser_ip, int id):mycache(mycache), sockect_as_server(server_sockect), ip(browser_ip), thread_id(id){}
 };
 
 #endif

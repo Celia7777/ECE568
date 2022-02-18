@@ -48,7 +48,7 @@ int server::setup(const char * port){
             return socket_fd;
 }
 
-int server::toAccept(int socket_fd){
+int server::toAccept(int socket_fd, std::string &ip){
     while(trySelect(socket_fd)!=1){
         
     }
@@ -63,7 +63,7 @@ int server::toAccept(int socket_fd){
     }
     struct sockaddr_in * addr = (struct sockaddr_in *)&connect_addr;
     std::cout << "accepting ip address: "<<inet_ntoa(addr->sin_addr) << std::endl;
-
+    ip = inet_ntoa(addr->sin_addr);
   
     return accept_fd;
 }

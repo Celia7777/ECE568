@@ -1,5 +1,16 @@
 #include "response.hpp"
 
+void Response::ParseStatusline(){
+    try{
+        std::size_t f_crlf = response.find("\r\n");
+        status_line = response.substr(0, f_crlf);
+        std::cout << "status line:" << status_line << std::endl;
+    }
+    catch(std::exception & exp){
+        status_line = "";
+    }
+}
+
 void Response::ParseCode(){
     try{
         std::size_t f_sp1 = response.find(' ');
@@ -61,6 +72,13 @@ void Response::ParseHeader(){
             }
             else{
                 is_nostore = false;
+            }
+            std::size_t f_revali = cache_control.find("must-revalidate");
+            if(f_revali != std::string::npos){
+                is_revalidate = true;
+            }
+            else{
+                is_revalidate = false;
             }
         }
 

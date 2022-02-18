@@ -1,7 +1,12 @@
 #include "proxy.hpp"
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+std::fstream file;
+// void proxy::writeToLog(std::string msg){
+//     file.writeLog(msg);
+// }
 
+/* 处理502 */
 
 /* get the first request */
 void proxy::receiveRequestFromClient(int fd, std::string &ans){
@@ -15,24 +20,32 @@ void proxy::receiveRequestFromClient(int fd, std::string &ans){
     //     perror("send");
     // }
     ans.assign(ans1, sizeof(ans1));
-    // std::cout << ans1 << std::endl;
 }
 
 proxy::proxy(const char* port):port_num(port){}
 
 void proxy::start(){
+    file.open("/var/log/erss/proxy.log", std::fstream::out);
+    if(file.is_open()){
+        std::cout << "open file success" << std::endl;
+    }else{
+        perror("file");
+        std::cout << "open file failure" << std::endl;
+    }
+    //file<<"this is the file";
     server *myserver = new server();
     int server_socket = myserver->setup("12345");
     cache *mycache = new cache(100);
     std::fstream fs;
     //TODO setup server socket setup failure
     while(1){
-        int server_accept_socket = myserver->toAccept(server_socket);
-        // std::string ans;
+        std::string browser_ip;
+        int server_accept_socket = myserver->toAccept(server_socket, browser_ip);
+        std::cout << browser_ip << std::endl;
         //create a new thread to receive the information from 
-        //processRequestFromClient(&server_accept_socket);
         pthread_t new_thread;
-        Thread *mythread = new Thread(mycache, server_accept_socket);
+        Thread *mythread = new Thread(mycache, server_accept_socket, browser_ip, id);
+        id++;
         pthread_create(&new_thread, NULL, processRequestFromClient, mythread);
     }
 }
@@ -43,6 +56,8 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
     Thread * mythread = (Thread*)mythread_ptr;
     cache* mycache = mythread->mycache;
     int server_accept_socket = mythread->sockect_as_server;
+    int id = mythread->thread_id;
+    std::string ip = mythread->ip;
     std::string original_rqst;
     //int original_len;
     receiveRequestFromClient(server_accept_socket, original_rqst);
@@ -71,22 +86,29 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
     std::strcpy (port, new_rqst.port.c_str());
     int connectToServer_fd = c.setupClient(domain, port);
     std::cout << "creating a socket to connect to the original server " << connectToServer_fd <<std::endl;
+    std::stringstream ss;
+    char *time = getCurrenttime();
+    ss << id <<": "<<'\"'<<new_rqst.rqst_line<<'\"'<<" from "<<ip<<" @ "<<time;
+    std::string str = ss.str();
+    pthread_mutex_lock(&mutex);
+    writeLog(str);
+    pthread_mutex_unlock(&mutex);
     //if get
     if(new_rqst.method.compare("GET")==0){
         std::cout << "start getting process" << std::endl;
-        getRequest(connectToServer_fd, server_accept_socket, new_rqst, mycache);
+        getRequest(connectToServer_fd, server_accept_socket, new_rqst, mycache, mythread->thread_id);
     }
     //if post
     if(new_rqst.method.compare("POST")==0){
         std::cout << "start posting process" << std::endl;
         //int client_fd, int server_fd, Request rqst
-        postRequest(connectToServer_fd, server_accept_socket, new_rqst);
+        postRequest(connectToServer_fd, server_accept_socket, new_rqst, id);
     }
 
     //if connect
     if(new_rqst.method.compare("CONNECT")==0){
         std::cout << "start connecting process" << std::endl;
-        tryConnect(server_accept_socket, connectToServer_fd);
+        tryConnect(server_accept_socket, connectToServer_fd, id, new_rqst);
     }
     close(server_accept_socket);
     close(connectToServer_fd);
@@ -96,9 +118,9 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
 }
 
 
-void proxy::tryConnect(int server_accept_socket, int connectToServer_fd){
-    int x = send(server_accept_socket, "HTTP/1.1 200 OK\r\n\r\n", 19, 0);
-    std::cout<<"send value here! "<<x<<std::endl;
+void proxy::tryConnect(int server_accept_socket, int connectToServer_fd, int id, Request request){
+    send(server_accept_socket, "HTTP/1.1 200 OK\r\n\r\n", 19, 0);
+    //std::cout<<"send value here! "<<x<<std::endl;
     fd_set readfds;//set of socket destriptor
     int n = std::max(server_accept_socket, connectToServer_fd) + 1;
     int rv;
@@ -127,7 +149,9 @@ void proxy::tryConnect(int server_accept_socket, int connectToServer_fd){
                 //std::cout << "receive bytes from client: " <<recv_res << std::endl;
             }
              //re-send the data to server
+             
              int send_res = send(connectToServer_fd, msg1, recv_res, 0);
+
              if(send_res>0){
                  //std::cout << "Success in send to server " << send_res << std::endl;
              }
@@ -207,7 +231,7 @@ std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk){
 
 
 /* proxy as client, connect to server*/
-void proxy::postRequest(int client_fd, int server_fd, Request rqst){
+void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
     //std::string origi_msg = rqst.origi_rqst;
     //int content_len = rqst.getLength();
     //std::string origi_msg = receiveAllchunks(server_fd);
@@ -221,15 +245,21 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst){
     std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk);
     std::cout << "message is: " << origi_msg;
     send(client_fd, origi_msg.data(), origi_msg.size() + 1, 0);
+    Request request(origi_msg);
+    pthread_mutex_lock(&mutex);
+    writeLogforproxyrequest(request, id);
+    pthread_mutex_unlock(&mutex);
     //receive from original server, receive the first response
         char origi_resp[65536] = {0};
         int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
-
         if(num > 0){
             Response response(origi_resp);
             //check chunk, receive all chunks
             bool rsps_chunk = response.isChunked();
             std::string all_response = receiveAllmsg(client_fd, response.response, rsps_chunk);
+            pthread_mutex_lock(&mutex);
+            writeLogforproxyresponse(all_response, request, id);
+            pthread_mutex_unlock(&mutex);
             // write into log here
             send(server_fd, all_response.data(), all_response.size() + 1, 0);
         }
@@ -241,7 +271,7 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst){
     //}
 }
 
-void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request rqst, Response resp, cache* mycache){
+void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request rqst, Response resp, cache* mycache, int id){
     // check ETag
     std::cout<<"handle request: "<<rqst.rqst_line<<std::endl;
     std::cout<<"handle request header: "<<rqst.header<<std::endl;
@@ -257,12 +287,18 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
     std::cout << "new request is" << vali_rqst << std::endl;
     std::cout << "new request length" <<vali_rqst.length()<<std::endl;
     send(proxy_as_client_fd, vali_rqst.data(), vali_rqst.size() + 1, 0);
+    pthread_mutex_lock(&mutex);
+    writeLogforproxyrequest(rqst, id);
+    pthread_mutex_unlock(&mutex);
     char vali_resp[65536] = {0};
     int vali_resp_len = recv(proxy_as_client_fd, vali_resp, sizeof(vali_resp), 0);
     std::cout << "revalidate: LENGTH" << vali_resp_len << std::endl;
     if(vali_resp_len != 0){
         std::string reps_str(vali_resp, vali_resp_len);
         Response response(reps_str);
+        pthread_mutex_lock(&mutex);
+        writeLogforproxyresponse(response, rqst, id);
+        pthread_mutex_unlock(&mutex);
         if(response.code == "200"){
             //update cache and response
             mycache->updateCache(rqst.rqst_line, response);
@@ -272,17 +308,20 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
             //response using cache
             send(proxy_as_server_fd, resp.response.data(), resp.response.size() + 1, 0);
         }
+        
     }
 }
 
-void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycache){
+void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycache, int id){
     // tell if the rqst is in cache or not
     //int content_len = rqst.getLength();
     //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
-    std::string origi_msg = rqst.origi_rqst;
+    bool rqst_chunk = rqst.isChunked();
+    std::string origi_msg = receiveAllmsg(server_fd, rqst.rqst_line, rqst_chunk);
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
     std::string rqst_line = rqst.rqst_line;
+    //cache需要修改收到200ok时的逻辑
     if(mycache->checkCache(rqst_line)){
         std::cout << "in cache" << std::endl;
         //if in cache
@@ -295,24 +334,48 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::cout << "my current age: "<<response.getLifespan()<<std::endl;
         //check no cache
         if(response.is_nocache){
+            std::stringstream ss;
+            ss << id;
+            ss << ": not in cache\n";
+            pthread_mutex_lock(&mutex);
+            writeLog(ss.str());
+            pthread_mutex_unlock(&mutex);
             std::cout << "no cache" << std::endl;
-            revalidate(client_fd, server_fd, rqst, response, mycache);
+            revalidate(client_fd, server_fd, rqst, response, mycache, id);
             return;
         }
         //check fresh
         if(response.isFresh()){
             std::cout << "is fresh" << std::endl;
+            std::stringstream ss;
+            ss << id;
+            ss << ": in cache, valid\n";
+            pthread_mutex_lock(&mutex);
+            writeLog(ss.str());
+            pthread_mutex_unlock(&mutex);
             send(server_fd, response.response.data(), response.response.size() + 1, 0);
             return;
         }else{
+            std::stringstream ss;
+            ss << id;
+            ss << ": in cache, requires validation\n";
+            pthread_mutex_lock(&mutex);
+            writeLog(ss.str());
+            pthread_mutex_unlock(&mutex);
             std::cout << "is validating" << std::endl;
-            revalidate(client_fd, server_fd, rqst, response, mycache);
+            revalidate(client_fd, server_fd, rqst, response, mycache, id);
             return;
         }
     }
     // if it is not in cache
     else{
         std::cout << "not in cache" << std::endl;
+        std::stringstream ss;
+        ss << id;
+        ss << ": not in cache\n";
+        pthread_mutex_lock(&mutex);
+        writeLog(ss.str());
+        pthread_mutex_unlock(&mutex);
         //int content_len = rqst.getLength();
         //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
         //std::cout<< content_len <<" bytes, original message from client"<<origi_msg<<std::endl;
@@ -330,37 +393,11 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         if(num > 0){
             std::string resp_str(origi_resp, num);
             Response response(resp_str);
+            bool resp_chunk = response.isChunked();
+            std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk);
             std::cout<<"received response"<<response.response<<std::endl;
-
-            //check chunk, receive all chunks
-            if(response.isChunked()){
-                send(server_fd, origi_resp, num, 0);
-                char chunked_buffer[1024] = {0};
-                while(1){
-                    int rec_num = recv(client_fd, chunked_buffer, sizeof(chunked_buffer), 0);
-                    std::string rec_str(chunked_buffer, rec_num);
-                    resp_str.append(rec_str);
-                    if (rec_num <= 0) {
-                        std::cout << "chunked break\n";
-                        break;
-                    }
-                    send(server_fd, chunked_buffer, rec_num, 0);
-                }
-                Response store_resp(resp_str);
-                //store response into cache
-                std::cout << "store response in to cache" << std::endl;
-                mycache->addToCache(rqst_line, store_resp);
-            }
-            //not chunk
-            else{
-                //store response into cache
-                std::cout << "store response in to cache" << std::endl;
-                mycache->addToCache(rqst_line, response);
-                //tell if it is cacheable, if it is, update the cache
-                
-                // write into log here
-                send(server_fd, origi_resp, num, 0);
-            }
+            Response store_resp(total_response);
+            mycache->addToCache(rqst_line, store_resp);
             
         }
         else{
@@ -370,4 +407,31 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //}
 }
 
+}
+
+void proxy::writeLog(std::string msg){
+    //need to mutex
+    file<<msg;
+}
+
+char* proxy::getCurrenttime(){
+    time_t nowtime;
+    time(&nowtime);
+    char* time_str = ctime(&nowtime);
+    return time_str;
+}
+
+void proxy::writeLogforproxyrequest(Request rqst_msg, int id){
+    std::stringstream ss;
+    ss << id<<": "<<" Requesting "<<'\"'<<rqst_msg.rqst_line<<'\"'<<" from "<<rqst_msg.domain << "\n";
+    std::string str = ss.str();
+    writeLog(str);
+}
+
+void proxy::writeLogforproxyresponse(Response rsps_msg, Request rqst, int id){
+    std::stringstream ss;
+    std::cout << "TEST: "<<rsps_msg.status_line << std::endl;
+    ss << id<<": "<<" Received "<<'\"'<<rsps_msg.status_line<<'\"'<<" from "<<rqst.domain << "\n";
+    std::string str = ss.str();
+    writeLog(str);
 }
