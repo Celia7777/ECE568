@@ -4,10 +4,12 @@ void Response::ParseStatusline(){
     try{
         std::size_t f_crlf = response.find("\r\n");
         status_line = response.substr(0, f_crlf);
+        msg_withoutline = response.substr(f_crlf + 5, response.size() - f_crlf - 5);
         std::cout << "status line:" << status_line << std::endl;
     }
     catch(std::exception & exp){
         status_line = "";
+        msg_withoutline = "";
     }
 }
 
@@ -81,8 +83,6 @@ void Response::ParseHeader(){
                 is_revalidate = false;
             }
         }
-
-        std::cout << "SUCCESS" << std::endl;
         // std::size_t f_exp = reponse.find("Expires: ");
         // std::size_t f_gmt;
         // if{f_gmt != std::string::npos}{

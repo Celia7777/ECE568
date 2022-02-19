@@ -2,11 +2,6 @@
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 std::fstream file;
-// void proxy::writeToLog(std::string msg){
-//     file.writeLog(msg);
-// }
-
-/* 处理502 */
 
 /* get the first request */
 void proxy::receiveRequestFromClient(int fd, std::string &ans){
@@ -19,6 +14,7 @@ void proxy::receiveRequestFromClient(int fd, std::string &ans){
     // if (send(fd, ans1, strlen(ans1), 0) == -1){
     //     perror("send");
     // }
+    std::cout << "very first length: " << recv_ans;
     ans.assign(ans1, recv_ans);
 }
 
@@ -203,29 +199,31 @@ void proxy::tryConnect(int server_accept_socket, int connectToServer_fd, int id,
 
 
 std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total){
+    //std::cout << "message length is" << msg.length() << "chunk is: " << chunk << std::endl;
     if(!chunk && msg.length()<=65536){
-        total+=msg.length() + 1;
+        total+=msg.length();
         return msg;
     }
     int rev_len = 0;
     std::string total_rqst;
     total_rqst.append(msg);
-    std::cout<<"first string: "<<total_rqst<<std::endl;
+    //std::cout<<"first string: "<<total_rqst<<std::endl;
     
     while(1){
-        std::cout<<"in while now"<<std::endl;
+        //std::cout<<"in while now"<<std::endl;
         char rev_msg[65536] = {0};
         rev_len = recv(fd, rev_msg, sizeof(rev_msg), 0);
-        std::cout<<"first receive length: "<<rev_len<<std::endl;
+        //std::cout<<"first receive length: "<<rev_len<<std::endl;
         if(rev_len<=0){
             break;
         }
         std::string rev_msg_str(rev_msg, rev_len);
-        std::cout<<"receive length is "<<rev_len<<" receive message is "<<rev_msg_str<<std::endl;
+        //std::cout<<"receive length is "<<rev_len<<" receive message is "<<rev_msg_str<<std::endl;
         if(chunk){
-            std::cout<<"it is chunked"<<std::endl;
-            std::size_t f_chunkend = rev_msg_str.find("0");
-            if(f_chunkend != std::string::npos){
+            //std::cout<<"it is chunked"<<std::endl;
+            std::size_t f_chunked = rev_msg_str.find("0\r\n\r\n");
+            if(f_chunked != std::string::npos){
+                std::cout<<"break here"<<std::endl;
                 std::string rec(rev_msg, rev_len);
                 total_rqst.append(rec);
                 total += rev_len;
@@ -233,7 +231,7 @@ std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total
             }
         }
         else{
-            std::cout<<"it is nochunk"<<std::endl;
+            //std::cout<<"it is nochunk"<<std::endl;
             if(rev_len <= 0){
                 break;
             }
@@ -241,6 +239,7 @@ std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total
         std::string rec(rev_msg, rev_len);
         total_rqst.append(rec);
         total += rev_len;
+        std::cout<<"chunk total length: "<<total<<std::endl;
     }
 
     return total_rqst;
@@ -270,6 +269,7 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
     //receive from original server, receive the first response
         char origi_resp[65536] = {0};
         int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
+        //std::cout<<"original response firstly: "<<origi_resp<<std::endl;
         if(num > 0){
             Response response(origi_resp);
             //check chunk, receive all chunks
@@ -296,7 +296,7 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
     // check ETag
     std::cout<<"handle request: "<<rqst.rqst_line<<std::endl;
     std::cout<<"handle request header: "<<rqst.header<<std::endl;
-    std::cout<<"handle response: "<<resp.response<<std::endl;
+    //std::cout<<"handle response: "<<resp.response<<std::endl;
     std::string vali_rqst = rqst.header + "\r\n";
     if(resp.etag != ""){
         vali_rqst += "If-None-Match: " + resp.etag + "\r\n";
@@ -354,8 +354,12 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
     bool rqst_chunk = rqst.isChunked();
     int origi_msg_len = 0;
+    std::cout << "reererqerq: "<<rqst.origi_rqst<<std::endl;
     std::cout << "ans length:"<<rqst.origi_rqst.length()<<std::endl;
-    std::string origi_msg = receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
+    std::cout << "CHUNK"<<rqst_chunk<<std::endl;
+    //std::string origi_msg = rqst.origi_rqst;
+    //int origi_msg_len = rqst.origi_rqst.length();
+    std::string origi_msg =receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
 
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
@@ -365,7 +369,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::cout << "in cache" << std::endl;
         //if in cache
         Response response = mycache->getResponse(rqst_line);
-        std::cout << "getting response from cache: " << response.response << std::endl;
+        //std::cout << "getting response from cache: " << response.response << std::endl;
         std::cout << "mymax-age: "<<response.max_age<<std::endl;
         std::cout << "myisfresh: "<<response.isFresh()<<std::endl;
         std::cout << "mydate: "<<response.date<<std::endl;
@@ -426,24 +430,32 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
        //  strcpy(request, origi_msg.c_str());
 
         //send to original server
-        std::cout << "origin message length is " << origi_msg_len << std::endl;
         int send_Res = send(client_fd, origi_msg.data(), origi_msg_len, 0);
+        std::cout<<"msg length is:"<<origi_msg.length()<<"compute length is: "<<origi_msg_len<<std::endl;
         std::cout << "send " << send_Res << "to server" << std::endl;
         std::cout << "send request: " << origi_msg<< std::endl;
         //receive from original server
         char origi_resp[65536] = {0};
         int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
-        std::cout << "receive: " << num << std::endl;
+
+        pthread_mutex_lock(&mutex);
+        //std::cout<<"original response firstly: "<<origi_resp<<std::endl;
+        std::cout << "receive: " << num <<std::endl;
+        pthread_mutex_unlock(&mutex);
         if(num > 0){
             std::string resp_str(origi_resp, num);
+            std::cout << "construct: " << resp_str.length()<<std::endl;
             Response response(resp_str);
             bool resp_chunk = response.isChunked();
             int total_response_len = 0;
             std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk, total_response_len);
             Response store_resp(total_response);
-            std::cout<<"total message: "<<total_response<<std::endl;
-            std::cout<<"received response: "<<store_resp.response<<std::endl;
-            mycache->addToCache(rqst_line, store_resp);
+            send(server_fd, total_response.data(), total_response_len, 0);
+            //std::cout<<"received response: "<<store_resp.response<<std::endl;
+            std::cout << "code: " << store_resp.code << std::endl;
+            if(!store_resp.is_nostore && store_resp.code.compare("206")!=0){
+                mycache->addToCache(rqst_line, store_resp);
+            }
             
         }
         else{
@@ -454,6 +466,10 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
 }
 
 }
+
+// void handle502(){
+
+// }
 
 void proxy::writeLog(std::string msg){
     //need to mutex

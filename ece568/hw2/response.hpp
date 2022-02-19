@@ -15,6 +15,7 @@ class Response{
 public:
     std::string response;
     std::string status_line;
+    std::string msg_withoutline;
     std::string code;
     // header field
     std::string etag;

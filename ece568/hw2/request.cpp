@@ -4,9 +4,11 @@ void Request::ParseRequestLine(){
     try{
         std::size_t f_CRLF = origi_rqst.find("\r\n");
         rqst_line = origi_rqst.substr(0, f_CRLF);
+        msg_withoutline = origi_rqst.substr(f_CRLF + 5, origi_rqst.size() - f_CRLF - 5);
     }
     catch(std::exception & exp){
         rqst_line = "";
+        msg_withoutline = "";
     }
     //处理错误
 }
@@ -100,7 +102,8 @@ int Request::getLength(){
 }
 
 bool Request::isChunked(){
-    std::size_t f_chunk = origi_rqst.find("chunked");
+    std::size_t f_chunk = msg_withoutline.find("chunked");
+    std::cout << "finding chunk in: " << f_chunk << std::endl;
     if(f_chunk != std::string::npos){
         return true;
     }

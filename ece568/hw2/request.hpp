@@ -13,6 +13,7 @@ class Request{
 public:
 std::string origi_rqst;
 std::string rqst_line;
+std::string msg_withoutline;
 std::string header;
 std::string method;
 std::string url;
