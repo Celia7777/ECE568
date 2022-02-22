@@ -1,8 +1,7 @@
 #include "proxy.hpp"
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-std::ofstream file;
+std::fstream file;
 
 /* get the first request */
 void proxy::receiveRequestFromClient(int fd, std::string &ans){
@@ -15,23 +14,25 @@ void proxy::receiveRequestFromClient(int fd, std::string &ans){
     // if (send(fd, ans1, strlen(ans1), 0) == -1){
     //     perror("send");
     // }
+    std::cout << "very first length: " << recv_ans;
     ans.assign(ans1, recv_ans);
 }
 
 proxy::proxy(const char* port):port_num(port){}
 
 void proxy::start(){
-    file.open("/var/log/erss/proxy.log");
-    //file.open("test.txt", std::ios::out);
+    file.open("/var/log/erss/proxy.log", std::fstream::out);
     if(file.is_open()){
         std::cout << "open file success" << std::endl;
     }else{
         perror("file");
         std::cout << "open file failure" << std::endl;
     }
+    //file<<"this is the file";
     server *myserver = new server();
     int server_socket = myserver->setup("12345");
     cache *mycache = new cache(100);
+    std::fstream fs;
     //TODO setup server socket setup failure
     while(1){
         std::string browser_ip;
@@ -86,10 +87,8 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
     ss << id <<": "<<'\"'<<new_rqst.rqst_line<<'\"'<<" from "<<ip<<" @ "<<time;
     std::string str = ss.str();
     pthread_mutex_lock(&mutex);
-    file<<str;
-    //file.close();
+    writeLog(str);
     pthread_mutex_unlock(&mutex);
-    
     //if get
     if(new_rqst.method.compare("GET")==0){
         std::cout << "start getting process" << std::endl;
@@ -283,10 +282,7 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
             pthread_mutex_unlock(&mutex);
             // write into log here
             send(server_fd, all_response.data(), all_response_len, 0);
-            pthread_mutex_lock(&mutex);
             writeLogproxyserver(new_rsps);
-             pthread_mutex_unlock(&mutex);
-
         }
         else{
             perror("error port");
@@ -328,9 +324,7 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
             //update cache and response
             mycache->updateCache(rqst.rqst_line, response);
             send(proxy_as_server_fd, response.response.data(), response.response.size() + 1, 0);
-             pthread_mutex_lock(&mutex);
             writeLogproxyserver(response);
-             pthread_mutex_unlock(&mutex);
             std::stringstream ss;
             ss << id << ": ";
             if(response.is_nostore==1){
@@ -348,9 +342,7 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
         else if(response.code == "304"){
             //response using cache
             send(proxy_as_server_fd, response.response.data(), response.response.size() + 1, 0);
-            pthread_mutex_lock(&mutex);
             writeLogproxyserver(response);
-             pthread_mutex_unlock(&mutex);
         }
         
     }
@@ -368,11 +360,11 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //std::string origi_msg = rqst.origi_rqst;
     //int origi_msg_len = rqst.origi_rqst.length();
     std::string origi_msg =receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
+
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
     std::string rqst_line = rqst.rqst_line;
     //cache需要修改收到200ok时的逻辑
-    pthread_mutex_lock(&cache_mutex);
     if(mycache->checkCache(rqst_line)){
         std::cout << "in cache" << std::endl;
         //if in cache
@@ -384,8 +376,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::cout << "my utc date: "<<response.getTime(response.date)<<std::endl;
         std::cout << "my current age: "<<response.getLifespan()<<std::endl;
         //check no cache
-        
-        if(response.is_nocache || response.is_revalidate){
+        if(response.is_nocache){
             std::cout << "is no cache" << std::endl;
             std::stringstream ss;
             ss << id;
@@ -407,16 +398,13 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             writeLog(ss.str());
             pthread_mutex_unlock(&mutex);
             send(server_fd, response.response.data(), response.response.size() + 1, 0);
-            pthread_mutex_lock(&mutex);
             writeLogproxyserver(response);
-            pthread_mutex_unlock(&mutex);
             return;
         }else{
             std::cout << "is not fresh" << std::endl;
             std::stringstream ss;
             ss << id;
-            ss << ": in cache, but expired at \n";
-            //ss << response.expire_date;
+            ss << ": in cache, requires validation\n";
             pthread_mutex_lock(&mutex);
             writeLog(ss.str());
             pthread_mutex_unlock(&mutex);
@@ -431,7 +419,9 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::stringstream ss;
         ss << id;
         ss << ": not in cache\n";
+        pthread_mutex_lock(&mutex);
         writeLog(ss.str());
+        pthread_mutex_unlock(&mutex);
         //int content_len = rqst.getLength();
         //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
         //std::cout<< content_len <<" bytes, original message from client"<<origi_msg<<std::endl;
@@ -441,7 +431,6 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
 
         //send to original server
         int send_Res = send(client_fd, origi_msg.data(), origi_msg_len, 0);
-        writeLogforproxyrequest(rqst, id);
         std::cout<<"msg length is:"<<origi_msg.length()<<"compute length is: "<<origi_msg_len<<std::endl;
         std::cout << "send " << send_Res << "to server" << std::endl;
         std::cout << "send request: " << origi_msg<< std::endl;
@@ -449,8 +438,10 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         char origi_resp[65536] = {0};
         int num = recv(client_fd, origi_resp, sizeof(origi_resp), 0);
 
+        pthread_mutex_lock(&mutex);
         //std::cout<<"original response firstly: "<<origi_resp<<std::endl;
         std::cout << "receive: " << num <<std::endl;
+        pthread_mutex_unlock(&mutex);
         if(num > 0){
             std::string resp_str(origi_resp, num);
             std::cout << "construct: " << resp_str.length()<<std::endl;
@@ -459,9 +450,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             int total_response_len = 0;
             std::string total_response = receiveAllmsg(client_fd, response.response, resp_chunk, total_response_len);
             Response store_resp(total_response);
-            writeLogforproxyresponse(store_resp, rqst, id);
             send(server_fd, total_response.data(), total_response_len, 0);
-            writeLogproxyserver(store_resp);
             //std::cout<<"received response: "<<store_resp.response<<std::endl;
             std::cout << "code: " << store_resp.code << std::endl;
             if(!store_resp.is_nostore && store_resp.code.compare("206")!=0){
@@ -474,8 +463,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
             //std::cerr<<"error port"<<std::endl;
         }
     //}
-    }
-    pthread_mutex_unlock(&cache_mutex);
+}
 
 }
 
@@ -485,9 +473,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
 
 void proxy::writeLog(std::string msg){
     //need to mutex
-    //std::lock_guard<std::mutex> lck(thread_mutex);
     file<<msg;
-    file.flush();
 }
 
 char* proxy::getCurrenttime(){
@@ -514,7 +500,7 @@ void proxy::writeLogforproxyresponse(Response rsps_msg, Request rqst, int id){
 
 void proxy::writeLogproxyserver(Response new_rsps){
     std::stringstream ss;
-    ss << "Responding"<<" "<<'\"'<<new_rsps.status_line<<'\"'<<"\n";
+    ss << "Responding"<<" "<<'\"'<<new_rsps.status_line<<'\"';
     std::string str = ss.str();
     writeLog(str);
 }
