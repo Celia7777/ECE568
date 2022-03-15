@@ -14,7 +14,7 @@ void proxy::receiveRequestFromClient(int fd, std::string &ans){
     // if (send(fd, ans1, strlen(ans1), 0) == -1){
     //     perror("send");
     // }
-    std::cout << "very first length: " << recv_ans;
+    //std::cout << "very first length: " << recv_ans;
     ans.assign(ans1, recv_ans);
 }
 
@@ -60,7 +60,6 @@ void * proxy::processRequestFromClient(void * mythread_ptr){
     if(original_rqst.empty()){
         return NULL;
     }
-    //std::cout << original_rqst;
     //begin parse
     Request new_rqst(original_rqst);
     //std::cout<<"parse request start here!"<<std::endl;
@@ -223,7 +222,7 @@ std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total
             //std::cout<<"it is chunked"<<std::endl;
             std::size_t f_chunked = rev_msg_str.find("0\r\n\r\n");
             if(f_chunked != std::string::npos){
-                std::cout<<"break here"<<std::endl;
+                //std::cout<<"break here"<<std::endl;
                 std::string rec(rev_msg, rev_len);
                 total_rqst.append(rec);
                 total += rev_len;
@@ -239,7 +238,7 @@ std::string proxy::receiveAllmsg(int fd, std::string msg, bool chunk, int& total
         std::string rec(rev_msg, rev_len);
         total_rqst.append(rec);
         total += rev_len;
-        std::cout<<"chunk total length: "<<total<<std::endl;
+        //std::cout<<"chunk total length: "<<total<<std::endl;
     }
 
     return total_rqst;
@@ -294,8 +293,8 @@ void proxy::postRequest(int client_fd, int server_fd, Request rqst, int id){
 
 void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request rqst, Response resp, cache* mycache, int id){
     // check ETag
-    std::cout<<"handle request: "<<rqst.rqst_line<<std::endl;
-    std::cout<<"handle request header: "<<rqst.header<<std::endl;
+    //std::cout<<"handle request: "<<rqst.rqst_line<<std::endl;
+    //std::cout<<"handle request header: "<<rqst.header<<std::endl;
     //std::cout<<"handle response: "<<resp.response<<std::endl;
     std::string vali_rqst = rqst.header + "\r\n";
     if(resp.etag != ""){
@@ -305,8 +304,8 @@ void proxy::revalidate(int proxy_as_client_fd, int proxy_as_server_fd, Request r
         vali_rqst += "If-Modified-Since: " + resp.last_modify + "\r\n";
     }
     vali_rqst += "\r\n\r\n";
-    std::cout << "new request is" << vali_rqst << std::endl;
-    std::cout << "new request length" <<vali_rqst.length()<<std::endl;
+    //std::cout << "new request is" << vali_rqst << std::endl;
+    //std::cout << "new request length" <<vali_rqst.length()<<std::endl;
     send(proxy_as_client_fd, vali_rqst.data(), vali_rqst.size() + 1, 0);
     pthread_mutex_lock(&mutex);
     writeLogforproxyrequest(rqst, id);
@@ -354,9 +353,9 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     //std::string origi_msg = receiveAllchunks(server_fd, rqst.origi_rqst, content_len);
     bool rqst_chunk = rqst.isChunked();
     int origi_msg_len = 0;
-    std::cout << "reererqerq: "<<rqst.origi_rqst<<std::endl;
-    std::cout << "ans length:"<<rqst.origi_rqst.length()<<std::endl;
-    std::cout << "CHUNK"<<rqst_chunk<<std::endl;
+    //std::cout << "reererqerq: "<<rqst.origi_rqst<<std::endl;
+    //std::cout << "ans length:"<<rqst.origi_rqst.length()<<std::endl;
+    //std::cout << "CHUNK"<<rqst_chunk<<std::endl;
     //std::string origi_msg = rqst.origi_rqst;
     //int origi_msg_len = rqst.origi_rqst.length();
     std::string origi_msg =receiveAllmsg(server_fd, rqst.origi_rqst, rqst_chunk, origi_msg_len);
@@ -364,7 +363,7 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
     std::cout<<"original message from client"<<origi_msg<<std::endl;
 
     std::string rqst_line = rqst.rqst_line;
-    //cache需要修改收到200ok时的逻辑
+    
     if(mycache->checkCache(rqst_line)){
         std::cout << "in cache" << std::endl;
         //if in cache
@@ -373,8 +372,8 @@ void proxy::getRequest(int client_fd, int server_fd, Request rqst, cache* mycach
         std::cout << "mymax-age: "<<response.max_age<<std::endl;
         std::cout << "myisfresh: "<<response.isFresh()<<std::endl;
         std::cout << "mydate: "<<response.date<<std::endl;
-        std::cout << "my utc date: "<<response.getTime(response.date)<<std::endl;
-        std::cout << "my current age: "<<response.getLifespan()<<std::endl;
+        //std::cout << "my utc date: "<<response.getTime(response.date)<<std::endl;
+        //std::cout << "my current age: "<<response.getLifespan()<<std::endl;
         //check no cache
         if(response.is_nocache){
             std::cout << "is no cache" << std::endl;
@@ -492,7 +491,7 @@ void proxy::writeLogforproxyrequest(Request rqst_msg, int id){
 
 void proxy::writeLogforproxyresponse(Response rsps_msg, Request rqst, int id){
     std::stringstream ss;
-    std::cout << "TEST: "<<rsps_msg.status_line << std::endl;
+    //std::cout << "TEST: "<<rsps_msg.status_line << std::endl;
     ss << id<<": "<<" Received "<<'\"'<<rsps_msg.status_line<<'\"'<<" from "<<rqst.domain << "\n";
     std::string str = ss.str();
     writeLog(str);

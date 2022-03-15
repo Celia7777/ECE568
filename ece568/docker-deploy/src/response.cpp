@@ -5,7 +5,7 @@ void Response::ParseStatusline(){
         std::size_t f_crlf = response.find("\r\n");
         status_line = response.substr(0, f_crlf);
         msg_withoutline = response.substr(f_crlf + 5, response.size() - f_crlf - 5);
-        std::cout << "status line:" << status_line << std::endl;
+        //std::cout << "status line:" << status_line << std::endl;
     }
     catch(std::exception & exp){
         status_line = "";
@@ -58,7 +58,7 @@ void Response::ParseHeader(){
         // the response is stale if its current age is greater than the age
         // value given (in seconds) at the time of a new request for that resource.
         cache_control = ParseHelper(response, "Cache-Control: ", "\r\n");
-        std::cout << "cache control is: " << cache_control << std::endl;
+        //std::cout << "cache control is: " << cache_control << std::endl;
         if(cache_control != ""){
             max_age = ParseHelper(cache_control, "max-age=", "\r\n");
             std::size_t f_nocache = cache_control.find("no-cache");
@@ -109,9 +109,9 @@ time_t Response::getTime(std::string time_str){
 double Response::getLifespan(){
     time_t origin_date = getTime(date);
     time_t now = time(NULL);
-    std::cout << "now time: " <<now<<std::endl;
+    //std::cout << "now time: " <<now<<std::endl;
     time_t now_utc = now - 28800; //unit: second
-    std::cout << "now utc time: "<<now_utc<<std::endl;
+    //std::cout << "now utc time: "<<now_utc<<std::endl;
     return difftime(now_utc, origin_date);
 }
 

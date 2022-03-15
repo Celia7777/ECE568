@@ -103,7 +103,7 @@ int Request::getLength(){
 
 bool Request::isChunked(){
     std::size_t f_chunk = msg_withoutline.find("chunked");
-    std::cout << "finding chunk in: " << f_chunk << std::endl;
+    //std::cout << "finding chunk in: " << f_chunk << std::endl;
     if(f_chunk != std::string::npos){
         return true;
     }
